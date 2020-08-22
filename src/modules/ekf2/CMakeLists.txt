@@ -40,10 +40,13 @@ px4_add_module(
 	STACK_MAX 2400
 	SRCS
 		ekf2_main.cpp
+		EKF2Selector.cpp
+		EKF2Selector.hpp
 	DEPENDS
 		git_ecl
 		ecl_EKF
 		ecl_geo
 		perf
 		Ekf2Utility
+		px4_work_queue
 	)
