@@ -87,8 +87,10 @@ private:
 		estimator_status_s estimator_status{};
 
 		hrt_abstime timestamp{0};
+		hrt_abstime time_last_selected{0};
 
 		float combined_test_ratio{0.f};
+		float relative_test_ratio{0.f};
 
 		uint16_t filter_fault_flags{0};
 
@@ -99,6 +101,10 @@ private:
 	};
 
 	static constexpr uint8_t MAX_INSTANCES{4};
+
+	static constexpr float _err_reduce_thresh{0.2f}; // instances have to be better than the selected by at least this amount before their relative score can be reduced
+	static constexpr float _rel_err_score_lim{1.0f}; // +- limit applied to the relative error score
+	static constexpr float _rel_err_thresh{0.5f};    // the relative score difference needs to be greater than this to switch from an otherwise healthy instance
 
 	EstimatorInstance _instance[MAX_INSTANCES] {
 		{this, 0},
@@ -147,6 +153,8 @@ private:
 	double _delta_lon{0};
 	uint8_t _lat_lon_reset_counter{0};
 
+	// Update the error scores for all available instances
+	void updateErrorScores();
 
 	// Publications
 	uORB::Publication<estimator_selector_status_s> _estimator_selector_status_pub{ORB_ID(estimator_selector_status)};
