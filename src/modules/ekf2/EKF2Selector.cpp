@@ -173,9 +173,13 @@ bool EKF2Selector::SelectInstance(uint8_t ekf_instance, bool force_reselect)
 
 void EKF2Selector::updateErrorScores()
 {
+	bool updated = false;
+
 	// calculate individual error scores
 	for (uint8_t i = 0; i < MAX_INSTANCES; i++) {
 		if (_instance[i].estimator_status_sub.update(&_instance[i].estimator_status)) {
+			updated = true;
+
 			const estimator_status_s &status = _instance[i].estimator_status;
 			_instance[i].timestamp = status.timestamp;
 			_instance[i].combined_test_ratio = 0.0f;
@@ -195,15 +199,17 @@ void EKF2Selector::updateErrorScores()
 		}
 	}
 
-	for (uint8_t i = 0; i < _available_instances; i++) {
-		if (i != _selected_instance) {
-			float error_delta = _instance[i].combined_test_ratio - _instance[_selected_instance].combined_test_ratio;
+	if (updated) {
+		for (uint8_t i = 0; i < _available_instances; i++) {
+			if (i != _selected_instance) {
+				float error_delta = _instance[i].combined_test_ratio - _instance[_selected_instance].combined_test_ratio;
 
-			// reduce error only if its better than the primary lane by at least _err_reduce_thresh to prevent unnecessary selection changes
-			if (error_delta > 0 || error_delta < -fmaxf(_err_reduce_thresh, 0.05f)) {
-				_instance[i].relative_test_ratio += error_delta;
-				_instance[i].relative_test_ratio = math::constrain(_instance[i].relative_test_ratio, -_rel_err_score_lim,
-								   _rel_err_score_lim);
+				// reduce error only if its better than the primary lane by at least _err_reduce_thresh to prevent unnecessary selection changes
+				if (error_delta > 0 || error_delta < -fmaxf(_err_reduce_thresh, 0.05f)) {
+					_instance[i].relative_test_ratio += error_delta;
+					_instance[i].relative_test_ratio = math::constrain(_instance[i].relative_test_ratio, -_rel_err_score_lim,
+									   _rel_err_score_lim);
+				}
 			}
 		}
 	}
@@ -246,17 +252,7 @@ void EKF2Selector::Run()
 		}
 	}
 
-	const uint8_t requested_instance = _requested_instance.load();
-
-	if (requested_instance != _selected_instance) {
-		if (requested_instance < _available_instances) {
-			PX4_WARN("manually selecting instance %d", requested_instance);
-			SelectInstance(requested_instance, true); // force reselect
-		}
-
-		_requested_instance.store(_selected_instance);
-
-	} else if (best_ekf_instance != _selected_instance) {
+	if (best_ekf_instance != _selected_instance) {
 
 		if (alternative_error > 1.f || !_instance[_selected_instance].filter_fault_flags || lower_error_available) {
 			SelectInstance(best_ekf_instance);

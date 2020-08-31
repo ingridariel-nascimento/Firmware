@@ -60,8 +60,6 @@ public:
 
 	void PrintStatus();
 
-	void RequestInstanceChange(uint8_t instance) { _requested_instance.store(instance); }
-
 private:
 	void Run() override;
 
@@ -112,8 +110,6 @@ private:
 		{this, 2},
 		{this, 3},
 	};
-
-	px4::atomic<uint8_t> _requested_instance{0};
 
 	uint8_t _available_instances{0};
 	uint8_t _selected_instance{UINT8_MAX};
