@@ -56,7 +56,7 @@ bool EKF2Selector::Start()
 void EKF2Selector::Stop()
 {
 	for (int i = 0; i < MAX_INSTANCES; i++) {
-		_instance[_selected_instance].estimator_attitude_sub.unregisterCallback();
+		_instance[i].estimator_attitude_sub.unregisterCallback();
 	}
 
 	ScheduleClear();
@@ -65,22 +65,20 @@ void EKF2Selector::Stop()
 bool EKF2Selector::SelectInstance(uint8_t ekf_instance, bool force_reselect)
 {
 	if (ekf_instance != _selected_instance || force_reselect) {
-
-		// switch callback registration
 		if (_selected_instance != UINT8_MAX) {
+			// switch callback registration
 			_instance[_selected_instance].estimator_attitude_sub.unregisterCallback();
+
+			PX4_WARN("primary EKF changed %d -> %d", _selected_instance, ekf_instance);
 		}
 
 		_instance[ekf_instance].estimator_attitude_sub.registerCallback();
-
-		if (_selected_instance != UINT8_MAX) {
-			PX4_WARN("primary EKF changed %d -> %d", _selected_instance, ekf_instance);
-		}
 
 		_selected_instance = ekf_instance;
 		_instance_changed_count++;
 		_last_instance_change = hrt_absolute_time();
 		_instance[_selected_instance].time_last_selected = _last_instance_change;
+		_instance[_selected_instance].relative_test_ratio = 0;
 
 		// handle resets on change
 
@@ -173,39 +171,49 @@ bool EKF2Selector::SelectInstance(uint8_t ekf_instance, bool force_reselect)
 
 void EKF2Selector::updateErrorScores()
 {
-	bool updated = false;
+	bool primary_updated = false;
 
 	// calculate individual error scores
 	for (uint8_t i = 0; i < MAX_INSTANCES; i++) {
 		if (_instance[i].estimator_status_sub.update(&_instance[i].estimator_status)) {
-			updated = true;
+			if ((i + 1) > _available_instances) {
+				_available_instances = i + 1;
+			}
+
+			if (i == _selected_instance) {
+				primary_updated = true;
+			}
 
 			const estimator_status_s &status = _instance[i].estimator_status;
-			_instance[i].timestamp = status.timestamp;
-			_instance[i].combined_test_ratio = 0.0f;
-			_instance[i].tilt_align = status.control_mode_flags & (1 << estimator_status_s::CS_TILT_ALIGN);
-			_instance[i].yaw_align = status.control_mode_flags & (1 << estimator_status_s::CS_YAW_ALIGN);
-			_instance[i].filter_fault_flags = status.filter_fault_flags;
 
-			if (_instance[i].tilt_align && _instance[i].yaw_align) {
+			const bool tilt_align = status.control_mode_flags & (1 << estimator_status_s::CS_TILT_ALIGN);
+			const bool yaw_align = status.control_mode_flags & (1 << estimator_status_s::CS_YAW_ALIGN);
+
+			_instance[i].combined_test_ratio = 0.0f;
+
+			if (tilt_align && yaw_align) {
 				_instance[i].combined_test_ratio = fmaxf(_instance[i].combined_test_ratio,
 								   0.5f * (status.vel_test_ratio + status.pos_test_ratio));
 				_instance[i].combined_test_ratio = fmaxf(_instance[i].combined_test_ratio, status.hgt_test_ratio);
 			}
 
-			if ((i + 1) > _available_instances) {
-				_available_instances = i + 1;
-			}
+			_instance[i].healthy = tilt_align && yaw_align && (status.filter_fault_flags == 0);
+
+		} else if (hrt_elapsed_time(&_instance[i].estimator_status.timestamp) > 20_ms) {
+			_instance[i].healthy = false;
 		}
 	}
 
-	if (updated) {
+	// update relative test ratios if primary has updated
+	if (primary_updated) {
 		for (uint8_t i = 0; i < _available_instances; i++) {
 			if (i != _selected_instance) {
-				float error_delta = _instance[i].combined_test_ratio - _instance[_selected_instance].combined_test_ratio;
 
-				// reduce error only if its better than the primary lane by at least _err_reduce_thresh to prevent unnecessary selection changes
-				if (error_delta > 0 || error_delta < -fmaxf(_err_reduce_thresh, 0.05f)) {
+				const float error_delta = _instance[i].combined_test_ratio - _instance[_selected_instance].combined_test_ratio;
+
+				// reduce error only if its better than the primary instance by at least _err_reduce_thresh to prevent unnecessary selection changes
+				//if (error_delta > 0 || error_delta < -fmaxf(_err_reduce_thresh, 0.05f)) {
+				if (error_delta > 0 || (error_delta < -0.00005f)) {
 					_instance[i].relative_test_ratio += error_delta;
 					_instance[i].relative_test_ratio = math::constrain(_instance[i].relative_test_ratio, -_rel_err_score_lim,
 									   _rel_err_score_lim);
@@ -229,36 +237,78 @@ void EKF2Selector::Run()
 
 	// loop through all available instances to find if an alternative is available
 	for (int i = 0; i < _available_instances; i++) {
-		if (i != _selected_instance) {
-			const float relative_error = _instance[i].relative_test_ratio;
-
+		if (_instance[i].healthy && (i != _selected_instance)) {
 			// Use an alternative instance if  -
 			// (healthy and has updated recently)
 			// AND
 			// (has relative error less than selected instance and has not been the selected instance for at least 10 seconds
 			// OR
-			// selected instance has stopped updating)
-			bool alternative_available = (!_instance[i].filter_fault_flags && hrt_elapsed_time(&_instance[i].timestamp) < 50_ms) &&
-						     ((relative_error < alternative_error && hrt_elapsed_time(&_instance[i].time_last_selected) > 10_s) ||
-						      hrt_elapsed_time(&_instance[_selected_instance].timestamp) > 50_ms);
+			// selected instance has stopped updating
+			const float relative_error = _instance[i].relative_test_ratio;
 
-			if (alternative_available) {
-				// if this instance has a significantly lower relative error to the active primary, we consider it as a
-				// better instance and would like to switch to it even if the current primary is healthy
-				lower_error_available = (relative_error <= -_rel_err_thresh);
+			if (relative_error < alternative_error) {
+
 				alternative_error = relative_error;
 				best_ekf_instance = i;
+
+				// relative error less than selected instance and has not been the selected instance for at least 10 seconds
+				if ((relative_error <= -_rel_err_thresh) && hrt_elapsed_time(&_instance[i].time_last_selected) > 10_s) {
+					lower_error_available = true;
+				}
 			}
 		}
 	}
 
-	if (best_ekf_instance != _selected_instance) {
+	if (lower_error_available) {
+		SelectInstance(best_ekf_instance);
 
-		if (alternative_error > 1.f || !_instance[_selected_instance].filter_fault_flags || lower_error_available) {
+	} else {
+		// force initial selection
+		if ((_selected_instance == UINT8_MAX) || !_instance[_selected_instance].healthy) {
+			// find new best instance if we don't have one from relative test ratios
+			if (best_ekf_instance == _selected_instance) {
+				float best_test_ratio = FLT_MAX;
+
+				// find lowest combined test ratio from a healthy instance
+				for (int i = 0; i < _available_instances; i++) {
+					if (_instance[i].healthy) {
+						const float test_ratio = _instance[i].combined_test_ratio;
+
+						if ((test_ratio > 0) && (test_ratio < best_test_ratio)) {
+							best_ekf_instance = i;
+							best_test_ratio = test_ratio;
+						}
+					}
+				}
+			}
+
 			SelectInstance(best_ekf_instance);
+		}
+	}
 
-		} else if (_selected_instance == UINT8_MAX) {
-			SelectInstance(best_ekf_instance, true); // force initial selection
+	if (_selected_instance == UINT8_MAX) {
+		// force initial selection
+		uint8_t best_instance = _selected_instance;
+		float best_test_ratio = FLT_MAX;
+
+		for (int i = 0; i < _available_instances; i++) {
+			if (_instance[i].healthy) {
+				const float test_ratio = _instance[i].combined_test_ratio;
+
+				if ((test_ratio > 0) && (test_ratio < best_test_ratio)) {
+					best_instance = i;
+					best_test_ratio = test_ratio;
+				}
+			}
+		}
+
+		SelectInstance(best_instance);
+
+	} else if (best_ekf_instance != _selected_instance) {
+		// if this instance has a significantly lower relative error to the active primary, we consider it as a
+		// better instance and would like to switch to it even if the current primary is healthy
+		if (lower_error_available || !_instance[_selected_instance].healthy) {
+			SelectInstance(best_ekf_instance);
 		}
 	}
 
@@ -385,11 +435,11 @@ void EKF2Selector::PrintStatus()
 	for (int i = 0; i < MAX_INSTANCES; i++) {
 		const EstimatorInstance &inst = _instance[i];
 
-		if (inst.timestamp > 0) {
+		if (inst.estimator_status.timestamp > 0) {
 			PX4_INFO("%d: ACC: %d, GYRO: %d, MAG: %d, %s, test ratio: %.5f (%.5f) %s",
 				 inst.instance, inst.estimator_status.accel_device_id, inst.estimator_status.gyro_device_id,
 				 inst.estimator_status.mag_device_id,
-				 inst.tilt_align && (inst.filter_fault_flags == 0) ? "healthy" : "fault",
+				 inst.healthy ? "healthy" : "unhealthy",
 				 (double)inst.combined_test_ratio, (double)inst.relative_test_ratio,
 				 (_selected_instance == i) ? "*" : "");
 		}

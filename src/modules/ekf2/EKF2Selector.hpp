@@ -84,16 +84,12 @@ private:
 
 		estimator_status_s estimator_status{};
 
-		hrt_abstime timestamp{0};
 		hrt_abstime time_last_selected{0};
 
 		float combined_test_ratio{0.f};
 		float relative_test_ratio{0.f};
 
-		uint16_t filter_fault_flags{0};
-
-		bool tilt_align{false};
-		bool yaw_align{false};
+		bool healthy{false};
 
 		const uint8_t instance;
 	};
