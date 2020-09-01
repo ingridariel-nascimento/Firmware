@@ -52,7 +52,7 @@ PARAM_DEFINE_INT32(CAL_GYRO1_ID, 0);
  * @category system
  * @group Sensor Calibration
  */
-PARAM_DEFINE_INT32(CAL_GYRO1_PRIO, 50);
+PARAM_DEFINE_INT32(CAL_GYRO1_PRIO, -1);
 
 /**
  * Gyro X-axis offset

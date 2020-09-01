@@ -52,7 +52,7 @@ PARAM_DEFINE_INT32(CAL_MAG1_ID, 0);
  * @category system
  * @group Sensor Calibration
  */
-PARAM_DEFINE_INT32(CAL_MAG1_PRIO, 50);
+PARAM_DEFINE_INT32(CAL_MAG1_PRIO, -1);
 
 /**
  * Rotation of magnetometer 1 relative to airframe.
