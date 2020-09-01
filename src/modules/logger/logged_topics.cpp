@@ -100,7 +100,12 @@ void LoggedTopics::add_default_topics()
 	add_topic("vtol_vehicle_status", 200);
 
 	// multi topics
-	add_topic_multi("actuator_outputs", 100);
+	add_topic_multi("actuator_outputs", 100, 2);
+	add_topic_multi("logger_status", 0, 2);
+	add_topic_multi("multirotor_motor_limits", 1000, 2);
+	add_topic_multi("telemetry_status", 1000);
+
+	// EKF multi topics
 	add_topic_multi("ekf_gps_drift");
 	add_topic_multi("estimator_attitude", 500);
 	add_topic_multi("estimator_global_position", 1000);
@@ -112,9 +117,6 @@ void LoggedTopics::add_default_topics()
 	add_topic_multi("estimator_sensor_bias", 1000);
 	add_topic_multi("estimator_states", 1000);
 	add_topic_multi("estimator_status", 500);
-	add_topic_multi("logger_status");
-	add_topic_multi("multirotor_motor_limits", 1000);
-	add_topic_multi("telemetry_status", 1000);
 	add_topic_multi("wind_estimate", 1000);
 	add_topic_multi("yaw_estimator_status", 500);
 
@@ -123,13 +125,13 @@ void LoggedTopics::add_default_topics()
 	add_topic_multi("differential_pressure", 1000);
 	add_topic_multi("distance_sensor", 1000);
 	add_topic_multi("optical_flow", 1000);
-	add_topic_multi("sensor_accel", 1000);
-	add_topic_multi("sensor_baro", 1000);
-	add_topic_multi("sensor_gyro", 1000);
-	add_topic_multi("sensor_mag", 1000);
-	add_topic_multi("vehicle_gps_position", 1000);
-	add_topic_multi("vehicle_imu", 500);
-	add_topic_multi("vehicle_imu_status", 1000);
+	add_topic_multi("sensor_accel", 1000, 3);
+	add_topic_multi("sensor_baro", 1000, 3);
+	add_topic_multi("sensor_gyro", 1000, 3);
+	add_topic_multi("sensor_mag", 1000, 4);
+	add_topic_multi("vehicle_gps_position", 1000, 2);
+	add_topic_multi("vehicle_imu", 500, 3);
+	add_topic_multi("vehicle_imu_status", 1000, 3);
 
 #ifdef CONFIG_ARCH_BOARD_PX4_SITL
 	add_topic("actuator_controls_virtual_fw");
@@ -186,22 +188,22 @@ void LoggedTopics::add_estimator_replay_topics()
 	add_topic("vehicle_visual_odometry");
 	add_topic("vehicle_visual_odometry_aligned");
 	add_topic_multi("distance_sensor");
-	add_topic_multi("vehicle_gps_position");
+	add_topic_multi("vehicle_gps_position", 0, 2);
 }
 
 void LoggedTopics::add_thermal_calibration_topics()
 {
-	add_topic_multi("sensor_accel", 100);
-	add_topic_multi("sensor_baro", 100);
-	add_topic_multi("sensor_gyro", 100);
+	add_topic_multi("sensor_accel", 100, 3);
+	add_topic_multi("sensor_baro", 100, 3);
+	add_topic_multi("sensor_gyro", 100, 3);
 }
 
 void LoggedTopics::add_sensor_comparison_topics()
 {
-	add_topic_multi("sensor_accel", 100);
-	add_topic_multi("sensor_baro", 100);
-	add_topic_multi("sensor_gyro", 100);
-	add_topic_multi("sensor_mag", 100);
+	add_topic_multi("sensor_accel", 100, 3);
+	add_topic_multi("sensor_baro", 100, 3);
+	add_topic_multi("sensor_gyro", 100, 3);
+	add_topic_multi("sensor_mag", 100, 4);
 }
 
 void LoggedTopics::add_vision_and_avoidance_topics()
@@ -364,10 +366,10 @@ bool LoggedTopics::add_topic(const char *name, uint16_t interval_ms, uint8_t ins
 	return success;
 }
 
-bool LoggedTopics::add_topic_multi(const char *name, uint16_t interval_ms)
+bool LoggedTopics::add_topic_multi(const char *name, uint16_t interval_ms, uint8_t max_num_instances)
 {
 	// add all possible instances
-	for (uint8_t instance = 0; instance < ORB_MULTI_MAX_INSTANCES; instance++) {
+	for (uint8_t instance = 0; instance < max_num_instances; instance++) {
 		add_topic(name, interval_ms, instance);
 	}
 
